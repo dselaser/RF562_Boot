@@ -28,14 +28,9 @@ static uint16_t s_pkt_counter = 0;
 void
 RS485_Init(void)
 {
-    /* UART2 is initialized in main.c via HAL_RS485Ex_Init */
-    /* Flush any stale data in RX */
-    USART_TypeDef *uart = huart2.Instance;
-    while (uart->ISR & USART_ISR_RXNE_RXFNE) {
-        (void)uart->RDR;
-    }
-    /* Clear error flags */
-    uart->ICR = USART_ICR_ORECF | USART_ICR_FECF | USART_ICR_NECF | USART_ICR_PECF;
+    while (USART2->ISR & USART_ISR_RXNE_RXFNE)
+        (void)USART2->RDR;
+    USART2->ICR = USART_ICR_ORECF | USART_ICR_FECF | USART_ICR_NECF | USART_ICR_PECF;
 }
 
 void
@@ -47,34 +42,26 @@ RS485_DeInit(void)
 int
 RS485_RecvByte(uint8_t *byte, uint32_t timeout_ms)
 {
-    USART_TypeDef *uart = huart2.Instance;
     uint32_t start = HAL_GetTick();
-
     while ((HAL_GetTick() - start) < timeout_ms) {
-        /* Clear error flags if any */
-        uint32_t isr = uart->ISR;
-        if (isr & (USART_ISR_ORE | USART_ISR_FE | USART_ISR_NE)) {
-            uart->ICR = USART_ICR_ORECF | USART_ICR_FECF | USART_ICR_NECF;
-        }
-        /* Check for received data */
-        if (isr & USART_ISR_RXNE_RXFNE) {
-            *byte = (uint8_t)(uart->RDR & 0xFF);
+        if (USART2->ISR & USART_ISR_RXNE_RXFNE) {
+            *byte = (uint8_t)(USART2->RDR & 0xFF);
             return 1;
         }
+        if (USART2->ISR & (USART_ISR_ORE | USART_ISR_FE | USART_ISR_NE))
+            USART2->ICR = USART_ICR_ORECF | USART_ICR_FECF | USART_ICR_NECF;
     }
-    return 0;  /* Timeout */
+    return 0;
 }
 
 void
 RS485_Send(const uint8_t *data, uint16_t len)
 {
-    /* Direct register access - HAL_UART_Transmit may fail if state not READY */
-    USART_TypeDef *uart = huart2.Instance;
     for (uint16_t i = 0; i < len; i++) {
-        while (!(uart->ISR & USART_ISR_TXE_TXFNF));
-        uart->TDR = data[i];
+        while (!(USART2->ISR & USART_ISR_TXE_TXFNF));
+        USART2->TDR = data[i];
     }
-    while (!(uart->ISR & USART_ISR_TC));  /* Wait TX complete before DE goes low */
+    while (!(USART2->ISR & USART_ISR_TC));
 }
 
 

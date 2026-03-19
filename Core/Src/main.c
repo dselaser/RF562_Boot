@@ -100,34 +100,11 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  /* MX_USART2_UART_Init(); -- replaced with register init below */
+  /* Use HAL RS485 init with 230400 baud */
+  huart2.Init.BaudRate = 230400;
+  MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
   Boot_LED_Init();
-
-  /* Manual USART2 init - bypass HAL completely */
-  {
-    __HAL_RCC_USART2_CLK_ENABLE();
-    __HAL_RCC_GPIOA_CLK_ENABLE();
-    GPIO_InitTypeDef gi = {0};
-    gi.Pin = GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3;
-    gi.Mode = GPIO_MODE_AF_PP;
-    gi.Pull = GPIO_PULLUP;
-    gi.Speed = GPIO_SPEED_FREQ_HIGH;
-    gi.Alternate = GPIO_AF7_USART2;
-    HAL_GPIO_Init(GPIOA, &gi);
-
-    USART2->CR1 = 0;  /* Disable USART */
-    USART2->CR2 = 0;
-    USART2->CR3 = 0;
-    USART2->PRESC = 0;
-    /* BRR: use same clock as working app */
-    /* Try multiple BRR values for common H5 clocks */
-    uint32_t pclk1 = HAL_RCC_GetPCLK1Freq();
-    USART2->BRR = pclk1 / 230400;
-    USART2->CR1 = USART_CR1_UE | USART_CR1_TE | USART_CR1_RE;
-    while (!(USART2->ISR & USART_ISR_TEACK));
-    while (!(USART2->ISR & USART_ISR_REACK));
-  }
 
   Boot_LED_Blink(2, 100);
   /* USER CODE END 2 */
@@ -156,6 +133,15 @@ int main(void)
           USART2->TDR = ack[i];
         }
         while (!(USART2->ISR & USART_ISR_TC));
+
+        /* Enter CNNX firmware receive mode */
+        huart2.Instance = USART2;  /* Needed for RS485_FirmwareReceive */
+        int result = RS485_FirmwareReceive();
+        if (result == 0)
+          Boot_LED_Blink(5, 50);   /* Success */
+        else
+          Boot_LED_Blink(10, 200); /* Fail */
+        NVIC_SystemReset();
       }
       if (prev == '@' && ch == 'A') {
         Boot_LED_Blink(5, 30);
@@ -295,7 +281,7 @@ static void MX_USART2_UART_Init(void)
 
   /* USER CODE END USART2_Init 1 */
   huart2.Instance = USART2;
-  huart2.Init.BaudRate = 115200;
+  huart2.Init.BaudRate = 230400;  /* Must match RF407 UART6 */
   huart2.Init.WordLength = UART_WORDLENGTH_8B;
   huart2.Init.StopBits = UART_STOPBITS_1;
   huart2.Init.Parity = UART_PARITY_NONE;
@@ -305,7 +291,7 @@ static void MX_USART2_UART_Init(void)
   huart2.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
   huart2.Init.ClockPrescaler = UART_PRESCALER_DIV1;
   huart2.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
-  if (HAL_RS485Ex_Init(&huart2, UART_DE_POLARITY_HIGH, 0, 0) != HAL_OK)
+  if (HAL_RS485Ex_Init(&huart2, UART_DE_POLARITY_LOW, 16, 16) != HAL_OK)
   {
     Error_Handler();
   }
