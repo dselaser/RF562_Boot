@@ -8,10 +8,14 @@
 #define BOOT_CONFIG_H
 
 /*===========================================================================*\
- *  Flash Memory Layout (STM32H562RG, 1MB, 8KB sectors)
+ *  Flash Memory Layout (STM32H562RG, 1MB dual-bank, 8KB sectors)
  *
- *  Sector  0-3  : 0x0800_0000 ~ 0x0800_7FFF  (32KB)  Bootloader
- *  Sector  4-127: 0x0800_8000 ~ 0x080F_FFFF  (992KB) Application
+ *  Bank 1: Sector  0-63  : 0x0800_0000 ~ 0x0807_FFFF  (512KB)
+ *  Bank 2: Sector  0-63  : 0x0808_0000 ~ 0x080F_FFFF  (512KB)
+ *          (absolute sector 64-127)
+ *
+ *  Bootloader : Sector 0-3  (32KB)   0x0800_0000 ~ 0x0800_7FFF
+ *  Application: Sector 4-127 (992KB) 0x0800_8000 ~ 0x080F_FFFF
 \*===========================================================================*/
 #define BOOT_FLASH_BASE         0x08000000U
 #define BOOT_FLASH_SIZE         0x00008000U     /* 32KB  */
@@ -24,7 +28,7 @@
 #define BOOT_SECTOR_START       0U
 #define BOOT_SECTOR_COUNT       4U
 #define APP_SECTOR_START        4U
-#define APP_SECTOR_END          127U
+#define APP_SECTOR_END          127U            /* Absolute sector numbering */
 
 /* STM32H5 quadword programming unit */
 #define FLASH_QUADWORD_SIZE     16U             /* 128-bit = 16 bytes */

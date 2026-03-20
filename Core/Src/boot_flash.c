@@ -2,8 +2,8 @@
  *  boot_flash.c - STM32H562 Flash Operations for Bootloader
  *
  *  STM32H562 Flash Characteristics:
- *    - 1MB total, single bank
- *    - 128 sectors x 8KB each
+ *    - 1MB total, dual bank (Bank1: 512KB, Bank2: 512KB)
+ *    - 128 sectors x 8KB each (64 per bank)
  *    - Programming unit: Quadword (128-bit = 16 bytes)
  *    - Erase: per sector (8KB)
 \*===========================================================================*/
@@ -12,6 +12,21 @@
 #include "boot_flash.h"
 #include "boot_config.h"
 
+/* ---- ICACHE helpers (STM32H5 caches all flash reads) ---- */
+static void icache_disable(void)
+{
+    if (ICACHE->CR & ICACHE_CR_EN) {
+        ICACHE->CR &= ~ICACHE_CR_EN;
+        while (ICACHE->SR & ICACHE_SR_BUSYF) {}
+    }
+}
+
+static void icache_invalidate(void)
+{
+    /* Full invalidate — required after flash write so verify reads real data */
+    ICACHE->CR |= ICACHE_CR_CACHEINV;
+    while (ICACHE->SR & ICACHE_SR_BUSYF) {}
+}
 
 HAL_StatusTypeDef
 Boot_Flash_EraseSectors(uint32_t start_sector, uint32_t num_sectors)
@@ -19,27 +34,59 @@ Boot_Flash_EraseSectors(uint32_t start_sector, uint32_t num_sectors)
     FLASH_EraseInitTypeDef erase;
     uint32_t sector_error = 0;
     HAL_StatusTypeDef ret;
+    uint32_t end_sector = start_sector + num_sectors - 1;
+
+    /* STM32H562 dual-bank: Bank1 = sectors 0-63, Bank2 = sectors 64-127 */
+    #define SECTORS_PER_BANK  (FLASH_BANK_SIZE / FLASH_SECTOR_SIZE)  /* 64 */
 
     /* Clamp to valid range */
-    if ((start_sector + num_sectors - 1) > APP_SECTOR_END) {
-        num_sectors = APP_SECTOR_END - start_sector + 1;
+    if (end_sector > APP_SECTOR_END) {
+        end_sector = APP_SECTOR_END;
+        num_sectors = end_sector - start_sector + 1;
     }
+
+    /* ICACHE must be disabled before flash erase on STM32H5 */
+    icache_disable();
 
     ret = HAL_FLASH_Unlock();
     if (ret != HAL_OK) return ret;
 
-    /* Clear all flash error flags */
     __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_ALL_ERRORS);
 
-    erase.TypeErase  = FLASH_TYPEERASE_SECTORS;
-    erase.Banks      = FLASH_BANK_1;
-    erase.Sector     = start_sector;
-    erase.NbSectors  = num_sectors;
+    /* ---- Erase Bank 1 portion (sectors 0-63) ---- */
+    if (start_sector < SECTORS_PER_BANK) {
+        uint32_t bank1_end = (end_sector < SECTORS_PER_BANK) ? end_sector : (SECTORS_PER_BANK - 1);
 
-    ret = HAL_FLASHEx_Erase(&erase, &sector_error);
+        erase.TypeErase = FLASH_TYPEERASE_SECTORS;
+        erase.Banks     = FLASH_BANK_1;
+        erase.Sector    = start_sector;
+        erase.NbSectors = bank1_end - start_sector + 1;
+
+        ret = HAL_FLASHEx_Erase(&erase, &sector_error);
+        if (ret != HAL_OK) {
+            HAL_FLASH_Lock();
+            return ret;
+        }
+    }
+
+    /* ---- Erase Bank 2 portion (sectors 64-127) ---- */
+    if (end_sector >= SECTORS_PER_BANK) {
+        uint32_t bank2_start = (start_sector >= SECTORS_PER_BANK) ? start_sector : SECTORS_PER_BANK;
+
+        erase.TypeErase = FLASH_TYPEERASE_SECTORS;
+        erase.Banks     = FLASH_BANK_2;
+        erase.Sector    = bank2_start - SECTORS_PER_BANK;  /* Per-bank sector number */
+        erase.NbSectors = end_sector - bank2_start + 1;
+
+        ret = HAL_FLASHEx_Erase(&erase, &sector_error);
+        if (ret != HAL_OK) {
+            HAL_FLASH_Lock();
+            return ret;
+        }
+    }
 
     HAL_FLASH_Lock();
-    return ret;
+    return HAL_OK;
 }
 
 
@@ -69,6 +116,9 @@ Boot_Flash_WriteBlock(uint32_t addr, const uint8_t *data, uint32_t len)
     uint8_t pad_buf[FLASH_QUADWORD_SIZE] __attribute__((aligned(4)));
 
     if (len == 0) return HAL_OK;
+
+    /* ICACHE must stay disabled during flash programming */
+    icache_disable();
 
     ret = HAL_FLASH_Unlock();
     if (ret != HAL_OK) return ret;
@@ -100,6 +150,10 @@ Boot_Flash_WriteBlock(uint32_t addr, const uint8_t *data, uint32_t len)
     }
 
     HAL_FLASH_Lock();
+
+    /* Invalidate ICACHE so subsequent verify reads real flash data */
+    icache_invalidate();
+
     return HAL_OK;
 }
 

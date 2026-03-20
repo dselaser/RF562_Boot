@@ -163,6 +163,29 @@ int main(void)
         }
         while (!(USART2->ISR & USART_ISR_TC));
       }
+      if (prev == '@' && ch == 'V') {
+        /* Reply with bootloader build date as YYYY-MM-DD */
+        HAL_Delay(2);
+        const char *dd = __DATE__; /* "Mar 20 2026" */
+        uint8_t mo = 0;
+        if (dd[0]=='J') mo=(dd[1]=='a')?1:(dd[2]=='n')?6:7;
+        else if (dd[0]=='F') mo=2;
+        else if (dd[0]=='M') mo=(dd[2]=='r')?3:5;
+        else if (dd[0]=='A') mo=(dd[1]=='p')?4:8;
+        else if (dd[0]=='S') mo=9;
+        else if (dd[0]=='O') mo=10;
+        else if (dd[0]=='N') mo=11;
+        else if (dd[0]=='D') mo=12;
+        char vr[] = "@V____-__-__*00\n";
+        vr[2]=dd[7]; vr[3]=dd[8]; vr[4]=dd[9]; vr[5]=dd[10]; /* YYYY */
+        vr[7]='0'+mo/10; vr[8]='0'+mo%10;                     /* MM */
+        vr[10]=(dd[4]==' ')?'0':dd[4]; vr[11]=dd[5];           /* DD */
+        for (int i = 0; vr[i]; i++) {
+          while (!(USART2->ISR & USART_ISR_TXE_TXFNF));
+          USART2->TDR = vr[i];
+        }
+        while (!(USART2->ISR & USART_ISR_TC));
+      }
       if (prev == '@' && ch == 'A') {
         Boot_LED_Blink(5, 30);
         if (Boot_Flash_IsAppValid())
