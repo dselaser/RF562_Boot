@@ -100,13 +100,15 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  /* USER CODE BEGIN 2 */
+  Boot_LED_Init();
+  Boot_LED_Blink(1, 50);  /* Early sign of life */
+
   /* Use HAL RS485 init with 230400 baud */
   huart2.Init.BaudRate = 230400;
   MX_USART2_UART_Init();
-  /* USER CODE BEGIN 2 */
-  Boot_LED_Init();
 
-  Boot_LED_Blink(2, 100);
+  Boot_LED_Blink(2, 100);  /* USART2 init OK */
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -124,7 +126,7 @@ int main(void)
     if (USART2->ISR & USART_ISR_RXNE_RXFNE) {
       uint8_t ch = (uint8_t)(USART2->RDR & 0xFF);
       if (prev == '@' && ch == 'U') {
-        Boot_LED_Blink(5, 30);
+        Boot_LED_Blink(3, 30);
         HAL_Delay(5);
         /* Send ACK */
         const char ack[] = "@U*55\n";
@@ -134,14 +136,32 @@ int main(void)
         }
         while (!(USART2->ISR & USART_ISR_TC));
 
+        /* Flush residual ASCII bytes and clear errors before CNNX mode */
+        HAL_Delay(3);
+        while (USART2->ISR & USART_ISR_RXNE_RXFNE)
+          (void)USART2->RDR;
+        USART2->ICR = USART_ICR_ORECF | USART_ICR_FECF | USART_ICR_NECF | USART_ICR_PECF;
+
         /* Enter CNNX firmware receive mode */
         huart2.Instance = USART2;  /* Needed for RS485_FirmwareReceive */
+        dbg_print("CNNX mode\r\n");
         int result = RS485_FirmwareReceive();
         if (result == 0)
           Boot_LED_Blink(5, 50);   /* Success */
         else
           Boot_LED_Blink(10, 200); /* Fail */
         NVIC_SystemReset();
+      }
+      if (prev == '@' && ch == 'T') {
+        /* RS485 test echo - no CNNX, no reset */
+        LED_ON();
+        HAL_Delay(2);
+        const char resp[] = "@T*54\n";
+        for (int i = 0; resp[i]; i++) {
+          while (!(USART2->ISR & USART_ISR_TXE_TXFNF));
+          USART2->TDR = resp[i];
+        }
+        while (!(USART2->ISR & USART_ISR_TC));
       }
       if (prev == '@' && ch == 'A') {
         Boot_LED_Blink(5, 30);
@@ -291,7 +311,7 @@ static void MX_USART2_UART_Init(void)
   huart2.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
   huart2.Init.ClockPrescaler = UART_PRESCALER_DIV1;
   huart2.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
-  if (HAL_RS485Ex_Init(&huart2, UART_DE_POLARITY_LOW, 16, 16) != HAL_OK)
+  if (HAL_RS485Ex_Init(&huart2, UART_DE_POLARITY_HIGH, 16, 16) != HAL_OK)
   {
     Error_Handler();
   }

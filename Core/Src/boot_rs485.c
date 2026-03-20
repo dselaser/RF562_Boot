@@ -17,6 +17,13 @@
 
 /* UART handle (defined in main.c) */
 extern UART_HandleTypeDef huart2;
+extern UART_HandleTypeDef huart1;  /* Debug UART */
+
+/* Minimal debug print via USART1 */
+static void rs485_dbg(const char *msg)
+{
+    HAL_UART_Transmit(&huart1, (const uint8_t *)msg, (uint16_t)strlen(msg), 100);
+}
 
 /* Packet counter for outgoing packets */
 static uint16_t s_pkt_counter = 0;
@@ -350,6 +357,7 @@ RS485_FirmwareReceive(void)
     uint8_t  cmd;
 
     LED_ON();
+    rs485_dbg("[B] FW recv start\r\n");
 
     /*===================================================================
      *  Step 1: Wait for FWPREPARE from Master
@@ -369,6 +377,12 @@ RS485_FirmwareReceive(void)
             cmd = s_rxpkt[PKT_OFF_CMD];
             master_id = s_rxpkt[PKT_OFF_SRC];
 
+            {
+                char dbg[32];
+                snprintf(dbg, sizeof(dbg), "[B] pkt cmd=%d\r\n", cmd);
+                rs485_dbg(dbg);
+            }
+
             if (cmd == CMD_FWWAIT) {
                 /* Master says "wait, not ready yet" - extend timeout */
                 wait_limit = (HAL_GetTick() - wait_start) + PACKET_TIMEOUT_MS;
@@ -386,8 +400,15 @@ RS485_FirmwareReceive(void)
 
                 /* Validate firmware size */
                 if (codesize == 0 || codesize > APP_FLASH_SIZE) {
+                    rs485_dbg("[B] bad size\r\n");
                     pkt_send(master_id, CMD_FWFAILURE, NULL, 0);
                     return -4;  /* Invalid size */
+                }
+                {
+                    char dbg[48];
+                    snprintf(dbg, sizeof(dbg), "[B] PREP sz=%lu blk=%lu\r\n",
+                             (unsigned long)codesize, (unsigned long)blockcnt);
+                    rs485_dbg(dbg);
                 }
                 got_prepare = 1;
                 break;
@@ -395,6 +416,7 @@ RS485_FirmwareReceive(void)
         }
 
         if (!got_prepare) {
+            rs485_dbg("[B] PREP timeout\r\n");
             return -1;  /* Timeout waiting for FWPREPARE */
         }
     }
@@ -402,13 +424,16 @@ RS485_FirmwareReceive(void)
     /*===================================================================
      *  Step 2: Erase Application Flash
      *===================================================================*/
+    rs485_dbg("[B] Erasing...\r\n");
     {
         HAL_StatusTypeDef ret = Boot_Flash_EraseApp(codesize);
         if (ret != HAL_OK) {
+            rs485_dbg("[B] Erase FAIL\r\n");
             pkt_send(master_id, CMD_FWWRERR, NULL, 0);
             return -2;  /* Flash erase failed */
         }
     }
+    rs485_dbg("[B] Erase OK\r\n");
 
     /* Send FWREADY to master (erase complete) */
     pkt_send(master_id, CMD_FWREADY, NULL, 0);
@@ -416,6 +441,7 @@ RS485_FirmwareReceive(void)
 
     /* Send FWSTART to request first code block */
     pkt_send(master_id, CMD_FWSTART, NULL, 0);
+    rs485_dbg("[B] FWREADY+START sent\r\n");
 
     /*===================================================================
      *  Step 3: Receive firmware blocks and write to flash

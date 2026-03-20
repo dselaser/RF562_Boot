@@ -35,7 +35,7 @@
  *  PA2 = USART2_TX
  *  PA3 = USART2_RX
 \*===========================================================================*/
-#define RS485_BAUDRATE          115200U
+#define RS485_BAUDRATE          230400U
 #define RS485_GPIO_PORT         GPIOA
 #define RS485_TX_PIN            GPIO_PIN_2
 #define RS485_RX_PIN            GPIO_PIN_3
